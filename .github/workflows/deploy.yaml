@@ -29,7 +29,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Check required page content
         run: grep -q 'Hello DevOps' app/index.html
-            - name: Build and smoke-test container
+      - name: Build and smoke-test container
         run: |
           docker build -t demo:test .
           docker run -d --name demo -p 8080:80 demo:test
