@@ -1,0 +1,78 @@
+name: CI and GitOps update
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'app/**'
+      - 'Dockerfile'
+      - '.github/workflows/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'app/**'
+      - 'Dockerfile'
+      - '.github/workflows/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check required page content
+        run: grep -q 'Hello DevOps' app/index.html
+      - name: Build and smoke-test container
+        run: |
+          docker build -t demo:test .
+          docker run -d --name demo -p 8080:80 demo:test
+          trap 'docker logs demo; docker rm -f demo' EXIT
+          curl --fail --retry 10 --retry-connrefused --retry-delay 1 \
+            http://localhost:8080 | grep 'Hello DevOps'
+
+  publish:
+    needs: check
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Define image name
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+      - name: Log in to GHCR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Build and publish for Intel and Apple Silicon
+        run: |
+          docker buildx build --platform linux/amd64,linux/arm64 \
+            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            --tag "$IMAGE:$GITHUB_SHA" --push .
+      - name: Update desired image in Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          # Do not deploy an obsolete build if main changed while it ran.
+          if [ "$(git rev-parse origin/main)" != "$GITHUB_SHA" ]; then
+            echo "main advanced; a newer run or manual rerun must deploy it."
+            exit 0
+          fi
+          sed -i "s|image: .*|image: $IMAGE:$GITHUB_SHA|" k8s/deployment.yaml
+          git add k8s/deployment.yaml
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "Deploy image $GITHUB_SHA"
+          git push origin HEAD:main
