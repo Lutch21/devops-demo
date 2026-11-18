@@ -76,3 +76,4 @@ jobs:
           if git diff --cached --quiet; then exit 0; fi
           git commit -m "Deploy image $GITHUB_SHA"
           git push origin HEAD:main
+# Trigger workflow validation
