@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
       - name: web
-        image: ghcr.io/lutch21/devops-demo:fc76063f65fef4295b923bcdeb30da7f2a269cbd
+        image: ghcr.io/lutch21/devops-demo:159c69bc699c00a4c8b3a85e239f2823de32f4e0
         ports:
         - containerPort: 80
         readinessProbe:
